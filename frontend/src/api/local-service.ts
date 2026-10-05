@@ -43,16 +43,29 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
-  const lastStatus = meta.statuses[meta.statuses.length - 1]
+  // 终态由模块显式声明，未声明时回退到状态列表最后一个（兼容旧模块配置）。
+  const terminalStatuses = meta.terminalStatuses ?? [meta.statuses[meta.statuses.length - 1]]
+  // 模块最后一个展示字段就是该业务的归档/状态字段，它必须与独立的 status 同步，
+  // 否则列表页展示字段与当前状态会对不上。
+  const statusField = meta.fields[meta.fields.length - 1]
   const updated: EntryRow = {
     ...rows[index],
     status: target,
-    pending: target !== lastStatus,
+    [statusField]: target,
+    pending: !terminalStatuses.includes(target),
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
   }
   const next = [...rows]
   next[index] = updated
-  saveRows(key, next)
+  try {
+    saveRows(key, next)
+  } catch (error) {
+    // 持久化失败（配额、隐私模式）：内存也已回滚，明确提示可重试，不假装成功。
+    return {
+      ok: false,
+      message: error instanceof Error ? `${error.message}，请重试` : '状态保存失败，请重试',
+    }
+  }
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 
