@@ -1,9 +1,20 @@
 import { MODULE_BY_KEY } from '@/data/modules'
 import { allRows, listRows, resetRows, saveRows } from '@/data/local-store'
+import { archivePhoto, reshootPhoto } from '@/data/reshoot'
 import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } from '@/data/types'
 
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
-const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
+const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚', '退回', '安排重拍', '安排重测']
+
+// 各模块承载状态的业务字段：流转时必须和 status 一起回写，列表页两边对得上。
+const STATUS_FIELD: Partial<Record<string, string>> = {
+  photography: '影像状态',
+  drawing: '图纸状态',
+}
+
+function isTerminal(meta: ModuleMeta, status: string): boolean {
+  return (meta.terminalStatuses ?? [meta.statuses[meta.statuses.length - 1]]).includes(status)
+}
 
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
@@ -30,6 +41,15 @@ export function listEntries(key: string, filters: Record<string, string> = {}): 
 
 export function runAction(key: string, id: number, action: string): ActionResult {
   const meta = moduleMeta(key)
+
+  // 影像模块的归档/重拍带跨模块事务与版本留痕，走专门链路。
+  if (key === 'photography' && action === '安排重拍') {
+    return reshootPhoto(id)
+  }
+  if (key === 'photography' && action === '提交归档') {
+    return archivePhoto(id)
+  }
+
   const target = meta.actionTargets[action]
   if (!target) {
     return { ok: false, message: `${meta.entity}没有登记「${action}」这个动作` }
@@ -43,16 +63,26 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
-  const lastStatus = meta.statuses[meta.statuses.length - 1]
   const updated: EntryRow = {
     ...rows[index],
     status: target,
-    pending: target !== lastStatus,
+    pending: !isTerminal(meta, target),
     abnormal: NEGATIVE_ACTIONS.some((verb) => action.startsWith(verb)),
+  }
+  const statusField = STATUS_FIELD[key]
+  if (statusField) {
+    updated[statusField] = target
   }
   const next = [...rows]
   next[index] = updated
-  saveRows(key, next)
+  try {
+    saveRows(key, next)
+  } catch (error) {
+    return {
+      ok: false,
+      message: `${action}失败，数据未改动，可重试：${error instanceof Error ? error.message : '存储异常'}`,
+    }
+  }
   return { ok: true, message: `${meta.entity}已${action}，当前状态「${target}」` }
 }
 
@@ -87,7 +117,7 @@ export function downloadEntries(key: string): void {
 export function loadOverview(): OverviewResult {
   const rows = allRows()
   const modules = [...MODULE_BY_KEY.values()].map((meta) => {
-    const entries = rows[meta.key] ?? []
+    const entries = (rows[meta.key] as EntryRow[] | undefined) ?? []
     return {
       name: meta.name,
       created: entries.length,

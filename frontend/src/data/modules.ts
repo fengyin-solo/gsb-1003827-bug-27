@@ -77,6 +77,8 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["已拍摄", "已编号", "已归档", "需重拍"],
     actions: ["分配编号", "提交归档", "安排重拍"],
     actionTargets: {"分配编号": "已编号", "提交归档": "已归档", "安排重拍": "需重拍"},
+    // 需重拍是往回流转状态，不能按状态数组末尾被当成终态。
+    terminalStatuses: ["已归档"],
     metrics: ["影像总数", "已归档数", "待编号数"],
   },
   {
@@ -88,6 +90,7 @@ export const MODULES: ModuleMeta[] = [
     statuses: ["绘制中", "待校核", "已校核", "已数字化", "需修改"],
     actions: ["提交校核", "确认校核", "退回修改"],
     actionTargets: {"提交校核": "待校核", "确认校核": "已校核", "退回修改": "需修改"},
+    terminalStatuses: ["已校核", "已数字化"],
     metrics: ["图纸总数", "已校核数", "待校核数"],
   },
   {
